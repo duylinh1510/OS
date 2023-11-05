@@ -1,0 +1,74 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <signal.h>
+
+
+int loop_forever = 1;
+void on_sigchld() {
+    loop_forever = 0;
+}
+
+
+int main() {
+    const char *name = "/bounded_buffer";
+   
+    //Tạo hoặc mở shared memory object
+    int fd;
+    fd = shm_open(name, O_CREAT | O_RDWR, 0666);
+   
+    //Đặt kích thước của shared memory object
+    ftruncate(fd, 10);
+   
+    //Ánh xạ shared memory vào không gian bộ nhớ của tiến trình
+    int *buffer;
+    buffer = mmap(0, 10, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+
+
+    pid_t pid = fork();
+    if (pid > 0) {
+        // Tiến trình cha (Producer) ghi dữ liệu vào buffer
+        srand(time(NULL));
+        int i = 0;
+        do {
+            signal(SIGCHLD, on_sigchld);
+            //Tạo số ngẫu nhiên từ 10 đến 20
+            int random = (rand() % 11) + 10;
+            //Kiểm tra i có nhỏ hơn giới hạn buffer hay không
+            if (i < 10) {
+                buffer[i] = random;
+                i++;
+            }
+        } while (loop_forever);
+        //Khi tiến trình con ngừng thì tiến trình cha kết thúc vòng lặp
+    }
+
+
+    else if (pid == 0) {
+        //Tiến trình con (Consumer) đọc dữ liệu từ buffer
+        int i = 0;
+        int ctotal = 0;
+        do {
+            ctotal += buffer[i];
+            printf("Consumer read: %d\n", buffer[i]);
+            i++;
+        } while ((ctotal + buffer[i]) < 100);
+        printf("Tong buffer la: %d\n", ctotal);
+        exit(0);
+        // Kết thúc tiến trình con khi hoàn thành công việc
+    }
+
+
+
+
+    // Giải phóng shared memory
+    munmap(buffer, 10);
+    close(fd);
+    shm_unlink(name);
+    return 0;
+}
